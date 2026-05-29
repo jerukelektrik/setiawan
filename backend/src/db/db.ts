@@ -3,50 +3,212 @@ import { open, Database } from 'sqlite';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
+import pg from 'pg';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const DB_PATH = path.join(__dirname, '../../database.sqlite');
-const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 
-let dbInstance: Database<sqlite3.Database, sqlite3.Statement> | null = null;
+export interface DbWrapper {
+  get<T = any>(sql: string, params?: any[]): Promise<T | undefined>;
+  all<T = any>(sql: string, params?: any[]): Promise<T[]>;
+  run(sql: string, params?: any[]): Promise<{ lastID?: number; changes?: number }>;
+  exec(sql: string): Promise<void>;
+  prepare(sql: string): Promise<{
+    run(...params: any[]): Promise<void>;
+    finalize(): Promise<void>;
+  }>;
+}
 
-export async function getDb(): Promise<Database<sqlite3.Database, sqlite3.Statement>> {
-  if (dbInstance) return dbInstance;
+// Translate SQLite query dialect to PostgreSQL
+function translateSql(sql: string): string {
+  let translated = sql;
 
-  // Ensure directory exists
-  const dir = path.dirname(DB_PATH);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
+  // 1. Translate SQLite specific INSERT OR IGNORE
+  if (translated.includes('INSERT OR IGNORE')) {
+    translated = translated.replace(/INSERT OR IGNORE INTO/gi, 'INSERT INTO');
+    if (translated.includes('master_data')) {
+      translated += ' ON CONFLICT (category, value) DO NOTHING';
+    }
   }
 
-  // Open database connection
-  dbInstance = await open({
-    filename: DB_PATH,
-    driver: sqlite3.Database
-  });
+  // 2. Translate SQLite parameter placeholders (?) to PostgreSQL ($1, $2, ...)
+  let index = 1;
+  translated = translated.replace(/\?/g, () => `$${index++}`);
 
-  // Enable foreign keys
-  await dbInstance.run('PRAGMA foreign_keys = ON');
+  return translated;
+}
 
-  // Initialize schema
-  const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
-  // SQLite multiple statements execution
-  await dbInstance.exec(schema);
+// 1. PostgreSQL Adapter
+class PgAdapter implements DbWrapper {
+  private pool: pg.Pool;
 
-  // Auto-seed
-  await seedDatabase(dbInstance);
+  constructor(pool: pg.Pool) {
+    this.pool = pool;
+  }
+
+  async get<T = any>(sql: string, params: any[] = []): Promise<T | undefined> {
+    const translated = translateSql(sql);
+    const res = await this.pool.query(translated, params);
+    return res.rows[0] as T | undefined;
+  }
+
+  async all<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+    const translated = translateSql(sql);
+    const res = await this.pool.query(translated, params);
+    return res.rows as T[];
+  }
+
+  async run(sql: string, params: any[] = []): Promise<{ lastID?: number; changes?: number }> {
+    let querySql = sql;
+    const isInsert = querySql.trim().toUpperCase().startsWith('INSERT INTO');
+    if (isInsert && !querySql.toUpperCase().includes('RETURNING')) {
+      querySql += ' RETURNING id';
+    }
+    const translated = translateSql(querySql);
+    const res = await this.pool.query(translated, params);
+    return {
+      lastID: isInsert && res.rows[0]?.id ? Number(res.rows[0].id) : undefined,
+      changes: res.rowCount || 0
+    };
+  }
+
+  async exec(sql: string): Promise<void> {
+    // Run multiple statement schema queries sequentially in postgres
+    // Split on semicolons but ignore inside strings
+    const statements = sql
+      .split(';')
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+    
+    for (const stmt of statements) {
+      await this.pool.query(stmt);
+    }
+  }
+
+  async prepare(sql: string) {
+    let querySql = sql;
+    const isInsert = querySql.trim().toUpperCase().startsWith('INSERT INTO');
+    if (isInsert && !querySql.toUpperCase().includes('RETURNING')) {
+      querySql += ' RETURNING id';
+    }
+    const translated = translateSql(querySql);
+    const pool = this.pool;
+    return {
+      async run(...params: any[]) {
+        await pool.query(translated, params);
+      },
+      async finalize() {
+        // No-op for postgres
+      }
+    };
+  }
+}
+
+// 2. SQLite Adapter
+class SqliteAdapter implements DbWrapper {
+  private db: Database;
+
+  constructor(db: Database) {
+    this.db = db;
+  }
+
+  async get<T = any>(sql: string, params: any[] = []): Promise<T | undefined> {
+    return this.db.get<T>(sql, params);
+  }
+
+  async all<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+    return this.db.all<T[]>(sql, params);
+  }
+
+  async run(sql: string, params: any[] = []): Promise<{ lastID?: number; changes?: number }> {
+    const res = await this.db.run(sql, params);
+    return {
+      lastID: res.lastID,
+      changes: res.changes
+    };
+  }
+
+  async exec(sql: string): Promise<void> {
+    await this.db.exec(sql);
+  }
+
+  async prepare(sql: string) {
+    const stmt = await this.db.prepare(sql);
+    return {
+      async run(...params: any[]) {
+        await stmt.run(...params);
+      },
+      async finalize() {
+        await stmt.finalize();
+      }
+    };
+  }
+}
+
+let dbInstance: DbWrapper | null = null;
+
+export async function getDb(): Promise<DbWrapper> {
+  if (dbInstance) return dbInstance;
+
+  const connectionString = process.env.DATABASE_URL;
+
+  if (connectionString) {
+    console.log('Connecting to Supabase PostgreSQL Database...');
+    const pool = new pg.Pool({
+      connectionString,
+      ssl: {
+        rejectUnauthorized: false
+      }
+    });
+
+    dbInstance = new PgAdapter(pool);
+
+    // Initialize Schema
+    const SCHEMA_PATH = path.join(__dirname, 'schema_pg.sql');
+    const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
+    await dbInstance.exec(schema);
+
+    // Auto-seed
+    await seedDatabase(dbInstance);
+  } else {
+    console.log('Connecting to local SQLite Database...');
+    // Ensure directory exists
+    const dir = path.dirname(DB_PATH);
+    if (!fs.existsSync(dir)) {
+      fs.mkdirSync(dir, { recursive: true });
+    }
+
+    const sqliteDb = await open({
+      filename: DB_PATH,
+      driver: sqlite3.Database
+    });
+
+    // Enable foreign keys
+    await sqliteDb.run('PRAGMA foreign_keys = ON');
+
+    dbInstance = new SqliteAdapter(sqliteDb);
+
+    // Initialize Schema
+    const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
+    const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
+    await dbInstance.exec(schema);
+
+    // Auto-seed
+    await seedDatabase(dbInstance);
+  }
 
   return dbInstance;
 }
 
 // Auto-seed Master Data and Sample Transactions
-async function seedDatabase(db: Database<sqlite3.Database, sqlite3.Statement>) {
+async function seedDatabase(db: DbWrapper) {
   // Check if master data is already populated
-  const masterCount = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM master_data');
+  const masterCount = await db.get<{ count: string | number }>('SELECT COUNT(*) as count FROM master_data');
+  const countNum = masterCount ? Number(masterCount.count) : 0;
   
-  if (masterCount && masterCount.count === 0) {
+  if (countNum === 0) {
     console.log('Seeding master data...');
     const seedValues: { category: string; value: string }[] = [
       // Sales
@@ -124,8 +286,9 @@ async function seedDatabase(db: Database<sqlite3.Database, sqlite3.Statement>) {
   }
 
   // Check if sample invoices exist
-  const invoiceCount = await db.get<{ count: number }>('SELECT COUNT(*) as count FROM invoices');
-  if (invoiceCount && invoiceCount.count === 0) {
+  const invoiceCount = await db.get<{ count: string | number }>('SELECT COUNT(*) as count FROM invoices');
+  const invCountNum = invoiceCount ? Number(invoiceCount.count) : 0;
+  if (invCountNum === 0) {
     console.log('Seeding sample transactions...');
     
     // Helper to get dates relative to today

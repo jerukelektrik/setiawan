@@ -44,4 +44,12 @@ async function startServer() {
   }
 }
 
-startServer();
+// Only listen locally if not in Vercel serverless environment
+if (!process.env.VERCEL) {
+  startServer();
+} else {
+  // Ensure DB gets initialized on Vercel startup
+  getDb().catch(err => console.error('Serverless DB init failed:', err));
+}
+
+export default app;
