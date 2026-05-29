@@ -6,7 +6,7 @@ const router = Router();
 // Helper to construct global SQL filters from query parameters
 function buildGlobalFilters(req: Request) {
   const { startDate, endDate, salesPerson, carBrand, carSeries, carYear } = req.query;
-  const whereClauses: string[] = ['i.status = "Final"'];
+  const whereClauses: string[] = ["i.status = 'Final'"];
   const params: any[] = [];
 
   if (startDate) {
@@ -139,7 +139,7 @@ router.get('/tires', async (req: Request, res: Response) => {
   const db = await getDb();
   const { startDate, endDate, salesPerson, tireSize, tireBrand } = req.query;
   
-  const whereClauses: string[] = ['i.status = "Final"', 'ii.category = "Barang"', 'ii.goods_type = "Ban"'];
+  const whereClauses: string[] = ["i.status = 'Final'", "ii.category = 'Barang'", "ii.goods_type = 'Ban'"];
   const params: any[] = [];
 
   if (startDate) {
@@ -247,7 +247,7 @@ router.get('/understeel', async (req: Request, res: Response) => {
   const db = await getDb();
   const { startDate, endDate, salesPerson, partName, position, carBrand, carSeries, carYear } = req.query;
 
-  const whereClauses: string[] = ['i.status = "Final"', 'ii.category = "Understeel"'];
+  const whereClauses: string[] = ["i.status = 'Final'", "ii.category = 'Understeel'"];
   const params: any[] = [];
 
   if (startDate) {
@@ -363,7 +363,7 @@ router.get('/services', async (req: Request, res: Response) => {
   const db = await getDb();
   const { startDate, endDate, salesPerson } = req.query;
 
-  const whereClauses: string[] = ['i.status = "Final"'];
+  const whereClauses: string[] = ["i.status = 'Final'"];
   const params: any[] = [];
 
   if (startDate) {
@@ -532,7 +532,7 @@ router.get('/leaderboard', async (req: Request, res: Response) => {
   const db = await getDb();
   const { startDate, endDate } = req.query;
 
-  const whereClauses: string[] = ['i.status = "Final"'];
+  const whereClauses: string[] = ["i.status = 'Final'"];
   const params: any[] = [];
 
   if (startDate) {

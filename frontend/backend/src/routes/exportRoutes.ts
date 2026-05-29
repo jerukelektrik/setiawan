@@ -152,7 +152,7 @@ router.get('/summary', async (req: Request, res: Response) => {
   const db = await getDb();
   const { startDate, endDate } = req.query;
 
-  const whereClauses: string[] = ['i.status = "Final"'];
+  const whereClauses: string[] = ["i.status = 'Final'"];
   const params: any[] = [];
 
   if (startDate) {
