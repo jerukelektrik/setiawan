@@ -12,7 +12,13 @@ import {
   Calendar,
   Filter,
   RefreshCw,
-  Car
+  Car,
+  LogOut,
+  Lock,
+  User,
+  Eye,
+  EyeOff,
+  AlertTriangle
 } from 'lucide-react';
 
 // Views (lazy components implemented directly below or imported)
@@ -48,8 +54,48 @@ export interface GlobalFilters {
 }
 
 export default function App() {
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState<boolean>(() => localStorage.getItem('crm_auth') === 'true');
+  const [usernameInput, setUsernameInput] = useState<string>('');
+  const [passwordInput, setPasswordInput] = useState<string>('');
+  const [showPassword, setShowPassword] = useState<boolean>(false);
+  const [loginError, setLoginError] = useState<string>('');
+  const [loginLoading, setLoginLoading] = useState<boolean>(false);
+
   const [activeTab, setActiveTab] = useState<string>('overview');
   const [editingInvoiceId, setEditingInvoiceId] = useState<number | null>(null);
+
+  const handleLogin = (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoginError('');
+
+    if (!usernameInput || !passwordInput) {
+      setLoginError('Username dan password wajib diisi!');
+      return;
+    }
+
+    setLoginLoading(true);
+
+    // Realistic premium delay
+    setTimeout(() => {
+      if (usernameInput.trim().toLowerCase() === 'rizki' && passwordInput === 'heaven123') {
+        setIsAuthenticated(true);
+        localStorage.setItem('crm_auth', 'true');
+        setLoginLoading(false);
+        setLoginError('');
+      } else {
+        setLoginError('Username atau password salah!');
+        setLoginLoading(false);
+      }
+    }, 850);
+  };
+
+  const handleLogout = () => {
+    setIsAuthenticated(false);
+    localStorage.removeItem('crm_auth');
+    setUsernameInput('');
+    setPasswordInput('');
+  };
 
   // Filters State
   const getThirtyDaysAgo = () => {
@@ -170,6 +216,98 @@ export default function App() {
     }
   };
 
+  if (!isAuthenticated) {
+    return (
+      <div className="login-screen">
+        <div className="login-glow-1"></div>
+        <div className="login-glow-2"></div>
+        
+        <div className="login-card">
+          <div className="login-header">
+            <span className="login-logo">🚗</span>
+            <h1 className="login-brand">BENGKEL BAN</h1>
+            <p className="login-subtitle">CRM Outlet MVP Login</p>
+          </div>
+          
+          <form onSubmit={handleLogin} className="login-form">
+            {loginError && (
+              <div className="login-alert">
+                <AlertTriangle size={16} />
+                <span>{loginError}</span>
+              </div>
+            )}
+            
+            <div className="form-group">
+              <label htmlFor="username">Username</label>
+              <div style={{ position: 'relative' }}>
+                <User size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dark)' }} />
+                <input
+                  id="username"
+                  type="text"
+                  placeholder="Masukkan username"
+                  className="input-control"
+                  style={{ paddingLeft: '36px' }}
+                  value={usernameInput}
+                  onChange={e => setUsernameInput(e.target.value)}
+                  disabled={loginLoading}
+                />
+              </div>
+            </div>
+            
+            <div className="form-group">
+              <label htmlFor="password">Password</label>
+              <div style={{ position: 'relative' }}>
+                <Lock size={16} style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)', color: 'var(--text-dark)' }} />
+                <input
+                  id="password"
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Masukkan password"
+                  className="input-control"
+                  style={{ paddingLeft: '36px', paddingRight: '36px' }}
+                  value={passwordInput}
+                  onChange={e => setPasswordInput(e.target.value)}
+                  disabled={loginLoading}
+                />
+                <button
+                  type="button"
+                  style={{
+                    position: 'absolute',
+                    right: '10px',
+                    top: '50%',
+                    transform: 'translateY(-50%)',
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--text-dark)',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                  onClick={() => setShowPassword(!showPassword)}
+                  disabled={loginLoading}
+                >
+                  {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                </button>
+              </div>
+            </div>
+            
+            <button
+              type="submit"
+              className="btn btn-primary"
+              style={{ width: '100%', marginTop: '0.75rem', height: '40px' }}
+              disabled={loginLoading}
+            >
+              {loginLoading ? 'Sedang Masuk...' : 'Masuk ke Aplikasi'}
+            </button>
+          </form>
+          
+          <div className="login-footer-text">
+            Sistem Administrasi CRM Bengkel Ban &copy; 2026
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="app-container">
       {/* Left Sidebar */}
@@ -239,6 +377,17 @@ export default function App() {
             <Download size={16} /> Backup & Export
           </button>
         </nav>
+
+        {/* Premium Logout Button */}
+        <div className="logout-container">
+          <button 
+            className="nav-item" 
+            onClick={handleLogout} 
+            style={{ color: 'var(--color-cancelled)', border: '1px solid transparent', width: '100%', justifyContent: 'flex-start' }}
+          >
+            <LogOut size={16} /> Keluar (Logout)
+          </button>
+        </div>
       </aside>
 
       {/* Right Area containing filters and main content */}
